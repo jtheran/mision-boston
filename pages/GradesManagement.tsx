@@ -3,6 +3,12 @@ import React, { useState, useMemo } from 'react';
 import { User, UserRole, GradeEntry, Student } from '../types';
 import { getSmartReportSummary } from '../services/geminiService';
 
+// Extendemos localmente el tipo para soportar detalles de tareas y metadata de materias
+interface ExtendedGradeEntry extends GradeEntry {
+  assignments?: { name: string; score: number; weight: string; date?: string }[];
+  teacherComment?: string;
+}
+
 const GradesManagement: React.FC<{ user: User }> = ({ user }) => {
   const studentsMock: Student[] = [
     { id: '1', name: 'Mateo Rodríguez', grade: '9-A', parentEmail: 'padre@correo.com', generalRank: 3, totalStudentsInCourse: 25 },
@@ -13,14 +19,66 @@ const GradesManagement: React.FC<{ user: User }> = ({ user }) => {
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [isViewingDetail, setIsViewingDetail] = useState(false);
+  const [expandedSubject, setExpandedSubject] = useState<string | null>(null);
+  const [isBulletinEnabled, setIsBulletinEnabled] = useState(false);
 
-  const [allGrades, setAllGrades] = useState<GradeEntry[]>([
-    { studentId: '1', subject: 'Matemáticas', score: 4.8, period: 1, subjectRank: 2, history: [4.2, 4.5, 4.8] },
-    { studentId: '1', subject: 'Lenguaje', score: 4.2, period: 1, subjectRank: 5, history: [3.8, 4.0, 4.2] },
-    { studentId: '1', subject: 'Ciencias', score: 3.9, period: 1, subjectRank: 10, history: [4.0, 3.8, 3.9] },
-    { studentId: '1', subject: 'Inglés', score: 4.5, period: 1, subjectRank: 4, history: [4.1, 4.3, 4.5] },
-    { studentId: '2', subject: 'Matemáticas', score: 5.0, period: 1, subjectRank: 1, history: [4.9, 5.0, 5.0] },
-    { studentId: '2', subject: 'Ciencias', score: 4.7, period: 1, subjectRank: 2, history: [4.5, 4.6, 4.7] },
+  // Estados para Filtros
+  const [filterSubject, setFilterSubject] = useState('');
+  const [filterPeriod, setFilterPeriod] = useState('');
+  const [filterScoreRange, setFilterScoreRange] = useState('');
+
+  // Estados para Edición Masiva
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedRowSubjects, setSelectedRowSubjects] = useState<Set<string>>(new Set());
+  const [bulkScore, setBulkScore] = useState<string>('');
+  const [bulkComment, setBulkComment] = useState<string>('');
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+
+  const [allGrades, setAllGrades] = useState<ExtendedGradeEntry[]>([
+    { 
+      studentId: '1', subject: 'Matemáticas', score: 4.8, period: 1, subjectRank: 2, history: [4.2, 4.5, 4.8],
+      assignments: [
+        { name: 'Examen Álgebra', score: 4.5, weight: '40%', date: '2024-02-15' },
+        { name: 'Taller Funciones', score: 5.0, weight: '30%', date: '2024-02-28' },
+        { name: 'Participación', score: 5.0, weight: '30%', date: 'Diario' }
+      ],
+      teacherComment: "Excelente razonamiento lógico y disposición para ayudar a sus compañeros. Demuestra liderazgo en resolución de problemas complejos y gran dominio de las funciones cuadráticas."
+    },
+    { 
+      studentId: '1', subject: 'Lenguaje', score: 4.2, period: 1, subjectRank: 5, history: [3.8, 4.0, 4.2],
+      assignments: [
+        { name: 'Ensayo Crítico', score: 4.0, weight: '50%', date: '2024-03-02' },
+        { name: 'Control Lectura', score: 4.4, weight: '50%', date: '2024-03-10' }
+      ],
+      teacherComment: "Buen manejo de la ortografía, puede profundizar más en sus análisis literarios mediante la conexión de contextos históricos y crítica social."
+    },
+    { 
+      studentId: '1', subject: 'Ciencias', score: 3.2, period: 1, subjectRank: 18, history: [4.0, 3.8, 3.2],
+      assignments: [
+        { name: 'Lab. Biología', score: 2.5, weight: '40%', date: '2024-02-20' },
+        { name: 'Proyecto Feria', score: 3.7, weight: '60%', date: '2024-03-05' }
+      ],
+      teacherComment: "Se recomienda reforzar los conceptos de biología celular. El estudiante requiere mayor atención al seguir protocolos de laboratorio y mejorar sus reportes técnicos."
+    },
+    { 
+      studentId: '1', subject: 'Inglés', score: 4.5, period: 1, subjectRank: 4, history: [4.1, 4.3, 4.5],
+      assignments: [
+        { name: 'Listening Test', score: 4.8, weight: '30%', date: '2024-03-01' },
+        { name: 'Oral Presentation', score: 4.3, weight: '70%', date: '2024-03-12' }
+      ],
+      teacherComment: "Fluidez destacada en diálogos espontáneos. Se recomienda practicar vocabulario técnico especializado para mejorar la precisión léxica."
+    },
+    { 
+      studentId: '2', subject: 'Matemáticas', score: 5.0, period: 1, subjectRank: 1, history: [4.9, 5.0, 5.0],
+      assignments: [{ name: 'Parcial Final', score: 5.0, weight: '100%', date: '2024-03-15' }],
+      teacherComment: "Desempeño impecable en todas las áreas de la materia. Es un ejemplo para el grupo y demuestra un compromiso total con su proceso de aprendizaje."
+    },
+    { 
+      studentId: '2', subject: 'Ciencias', score: 4.7, period: 1, subjectRank: 2, history: [4.5, 4.6, 4.7],
+      assignments: [{ name: 'Taller Células', score: 4.7, weight: '100%', date: '2024-03-08' }],
+      teacherComment: "Gran interés investigativo y excelente capacidad de síntesis en sus informes de laboratorio."
+    },
   ]);
 
   const activeStudent = useMemo(() => 
@@ -28,28 +86,91 @@ const GradesManagement: React.FC<{ user: User }> = ({ user }) => {
     [selectedStudentId]
   );
 
-  const activeGrades = useMemo(() => 
-    allGrades.filter(g => g.studentId === selectedStudentId),
-    [allGrades, selectedStudentId]
-  );
+  const activeGrades = useMemo(() => {
+    let filtered = allGrades.filter(g => g.studentId === selectedStudentId);
+    
+    if (filterSubject) {
+      filtered = filtered.filter(g => g.subject.toLowerCase().includes(filterSubject.toLowerCase()));
+    }
+    
+    if (filterPeriod) {
+      filtered = filtered.filter(g => g.period === parseInt(filterPeriod));
+    }
+    
+    if (filterScoreRange) {
+      if (filterScoreRange === 'superior') filtered = filtered.filter(g => g.score >= 4.6);
+      else if (filterScoreRange === 'alto') filtered = filtered.filter(g => g.score >= 4.0 && g.score < 4.6);
+      else if (filterScoreRange === 'basico') filtered = filtered.filter(g => g.score >= 3.5 && g.score < 4.0);
+      else if (filterScoreRange === 'bajo') filtered = filtered.filter(g => g.score < 3.5);
+    }
+    
+    return filtered;
+  }, [allGrades, selectedStudentId, filterSubject, filterPeriod, filterScoreRange]);
 
-  const averageScore = useMemo(() => 
-    (activeGrades.reduce((acc, curr) => acc + curr.score, 0) / activeGrades.length).toFixed(2),
-    [activeGrades]
-  );
+  const averageScore = useMemo(() => {
+    const studentGrades = allGrades.filter(g => g.studentId === selectedStudentId);
+    if (studentGrades.length === 0) return "0.00";
+    return (studentGrades.reduce((acc, curr) => acc + curr.score, 0) / studentGrades.length).toFixed(2);
+  }, [allGrades, selectedStudentId]);
 
-  // Datos para la gráfica de tendencia general (promedio de los meses anteriores)
   const historicalAverages = [4.1, 4.3, 4.2, 4.5, 4.4, parseFloat(averageScore)];
+
+  const resetFilters = () => {
+    setFilterSubject('');
+    setFilterPeriod('');
+    setFilterScoreRange('');
+  };
 
   const handleScoreChange = (index: number, value: string) => {
     const score = parseFloat(value);
     if (isNaN(score) || score < 0 || score > 5.0) return;
     const newGrades = [...allGrades];
-    const globalIndex = allGrades.findIndex(g => g.studentId === selectedStudentId && g.subject === activeGrades[index].subject);
+    const targetGrade = activeGrades[index];
+    const globalIndex = allGrades.findIndex(g => g.studentId === selectedStudentId && g.subject === targetGrade.subject && g.period === targetGrade.period);
     if (globalIndex !== -1) {
       newGrades[globalIndex].score = score;
       setAllGrades(newGrades);
     }
+  };
+
+  const toggleRowSelection = (subject: string) => {
+    const newSelection = new Set(selectedRowSubjects);
+    if (newSelection.has(subject)) newSelection.delete(subject);
+    else newSelection.add(subject);
+    setSelectedRowSubjects(newSelection);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedRowSubjects.size === activeGrades.length) {
+      setSelectedRowSubjects(new Set());
+    } else {
+      setSelectedRowSubjects(new Set(activeGrades.map(g => g.subject)));
+    }
+  };
+
+  const applyBulkChanges = () => {
+    const newGrades = [...allGrades];
+    const scoreVal = parseFloat(bulkScore);
+    
+    selectedRowSubjects.forEach(subject => {
+      const globalIndex = newGrades.findIndex(g => g.studentId === selectedStudentId && g.subject === subject);
+      if (globalIndex !== -1) {
+        if (!isNaN(scoreVal)) newGrades[globalIndex].score = scoreVal;
+        if (bulkComment.trim()) newGrades[globalIndex].teacherComment = bulkComment;
+      }
+    });
+
+    setAllGrades(newGrades);
+    setIsBulkMode(false);
+    setSelectedRowSubjects(new Set());
+    setBulkScore('');
+    setBulkComment('');
+    setShowBulkConfirm(false);
+  };
+
+  const toggleRow = (subject: string) => {
+    if (isBulkMode) return;
+    setExpandedSubject(expandedSubject === subject ? null : subject);
   };
 
   const handleGenerateSummary = async () => {
@@ -59,286 +180,521 @@ const GradesManagement: React.FC<{ user: User }> = ({ user }) => {
     setLoadingAi(false);
   };
 
-  return (
-    <div className="space-y-8 animate-fadeIn">
-      {/* Selector de Hijo */}
-      {user.role === UserRole.PARENT && (
-        <div className="flex items-center space-x-4 bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-          <span className="text-xs font-black text-gray-400 uppercase tracking-widest px-2">Ver información de:</span>
-          {studentsMock.map(s => (
-            <button
-              key={s.id}
-              onClick={() => setSelectedStudentId(s.id)}
-              className={`px-6 py-2 rounded-xl font-bold text-sm transition-all ${
-                selectedStudentId === s.id 
-                ? 'bg-royal-blue text-white shadow-lg scale-105' 
-                : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
-              }`}
+  const handleDownloadBulletin = () => {
+    if (!isBulletinEnabled) return;
+    alert(`Generando Boletín Oficial de ${activeStudent.name}...\n\nPromedio: ${averageScore}\nPuesto: ${activeStudent.generalRank}\n\nDocumento validado por Secretaría Académica del Instituto Cristiano Misión Boston.`);
+  };
+
+  const canEnableBulletins = user.role === UserRole.ADMIN || user.role === UserRole.ADMINISTRATIVE;
+
+  const getScoreBadgeStyles = (score: number) => {
+    if (score >= 4.6) return 'bg-royal-blue text-white ring-4 ring-royal-blue/10'; // Superior
+    if (score >= 4.0) return 'bg-green-100 text-green-700 ring-4 ring-green-50'; // Alto
+    if (score >= 3.5) return 'bg-yellow-100 text-yellow-700 ring-4 ring-yellow-50'; // Básico
+    return 'bg-red-100 text-red-600 ring-4 ring-red-50'; // Bajo
+  };
+
+  const getScoreLabel = (score: number) => {
+    if (score >= 4.6) return 'Superior';
+    if (score >= 4.0) return 'Alto';
+    if (score >= 3.5) return 'Básico';
+    return 'Bajo';
+  };
+
+  if (isViewingDetail) {
+    return (
+      <div className="space-y-10 animate-fadeIn text-black pb-20">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-6">
+            <button 
+              onClick={() => setIsViewingDetail(false)}
+              className="w-14 h-14 bg-white border-2 border-royal-blue/10 rounded-2xl flex items-center justify-center text-royal-blue hover:bg-royal-blue hover:text-white transition-all shadow-sm transform hover:scale-105"
             >
+              <span className="text-2xl">←</span>
+            </button>
+            <div>
+              <h2 className="text-4xl font-black text-gray-900 tracking-tight italic">Expediente del Alumno</h2>
+              <p className="text-gray-500 font-bold uppercase text-[10px] tracking-[0.2em] mt-1">Hoja de Vida Académica Institucional</p>
+            </div>
+          </div>
+          <div className="hidden md:block">
+            <span className="bg-school-yellow text-royal-blue px-6 py-2 rounded-full font-black text-xs uppercase shadow-md">Año Lectivo 2024</span>
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-12 gap-10">
+          <div className="lg:col-span-4 space-y-8">
+            <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-gray-100 flex flex-col items-center text-center relative overflow-hidden group">
+              <div className="absolute top-0 left-0 w-full h-2 bg-royal-blue"></div>
+              <div className="w-32 h-32 bg-royal-blue rounded-[2.5rem] flex items-center justify-center text-white text-5xl font-black shadow-2xl mb-6 transform group-hover:rotate-6 transition-transform">
+                {activeStudent.name.charAt(0)}
+              </div>
+              <h3 className="text-3xl font-black text-gray-900 leading-tight">{activeStudent.name}</h3>
+              <p className="text-royal-blue font-black uppercase tracking-widest text-sm mt-1">Estudiante Regular</p>
+              
+              <div className="w-full space-y-4 mt-10 pt-10 border-t border-gray-100">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 font-bold text-xs uppercase tracking-wider">Grado Actual:</span>
+                  <span className="font-black text-gray-900 bg-blue-50 px-3 py-1 rounded-xl">{activeStudent.grade}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 font-bold text-xs uppercase tracking-wider">Código MB:</span>
+                  <span className="font-black text-gray-900">MB-2024-{activeStudent.id}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 font-bold text-xs uppercase tracking-wider">Acudiente:</span>
+                  <span className="font-black text-royal-blue underline cursor-pointer">{activeStudent.parentEmail.split('@')[0]}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-royal-blue p-8 rounded-[2.5rem] shadow-2xl text-white">
+              <h4 className="font-black text-xl mb-6 italic">Logros Destacados</h4>
+              <div className="space-y-4">
+                <div className="flex items-center space-x-4 bg-white/10 p-4 rounded-2xl">
+                  <span className="text-3xl">🏆</span>
+                  <div>
+                    <p className="font-black text-sm">Cuadro de Honor</p>
+                    <p className="text-[10px] text-blue-100 uppercase font-bold">Primer Periodo 2024</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-8 space-y-8">
+            <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-gray-100">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+                <div>
+                  <h3 className="text-2xl font-black text-gray-900 italic">Tendencia de Progreso</h3>
+                </div>
+                <div className="flex items-center bg-gray-50 px-4 py-2 rounded-2xl">
+                  <span className="text-[10px] font-black text-gray-400 uppercase mr-3">Promedio Actual:</span>
+                  <span className="text-3xl font-black text-royal-blue">{averageScore}</span>
+                </div>
+              </div>
+
+              <div className="relative h-72 w-full flex items-end">
+                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                  {[5, 4, 3, 2, 1, 0].map(val => (
+                    <div key={val} className="border-t border-gray-100 w-full h-0 relative">
+                      <span className="absolute -left-10 -top-2 text-[10px] font-black text-gray-300">{val}.0</span>
+                    </div>
+                  ))}
+                </div>
+
+                <svg className="w-full h-full relative z-10 overflow-visible" preserveAspectRatio="none">
+                  <polyline
+                    fill="none"
+                    stroke="#0038A8"
+                    strokeWidth="6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={historicalAverages.map((v, i) => `${(i * (100 / 5))}%,${288 - (v / 5 * 288)}`).join(' ')}
+                    className="animate-draw"
+                  />
+                  {historicalAverages.map((v, i) => (
+                    <circle key={i} cx={`${(i * (100 / 5))}%`} cy={288 - (v / 5 * 288)} r="8" fill="#FFD700" stroke="#0038A8" strokeWidth="3" />
+                  ))}
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 animate-fadeIn text-black pb-32">
+      {/* Panel Administrativo */}
+      {canEnableBulletins && (
+        <div className="bg-white border-2 border-gray-100 p-6 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm hover:border-royal-blue/20 transition-all">
+          <div className="flex items-center space-x-5">
+             <div className="w-14 h-14 bg-royal-blue text-school-yellow rounded-2xl flex items-center justify-center text-3xl shadow-lg transform -rotate-3">⚙️</div>
+             <div>
+                <h3 className="font-black text-gray-900 uppercase text-xs tracking-widest">Publicación de Boletines</h3>
+                <p className="text-xs font-medium text-gray-500 mt-1">Habilita la descarga masiva para padres y alumnos del periodo actual.</p>
+             </div>
+          </div>
+          <div className="flex items-center space-x-6 bg-gray-50 px-6 py-3 rounded-2xl border border-gray-100">
+            <div className="flex items-center space-x-3">
+               <span className={`text-[10px] font-black uppercase tracking-widest ${!isBulletinEnabled ? 'text-royal-blue' : 'text-gray-300'}`}>Cerrado</span>
+               <button onClick={() => setIsBulletinEnabled(!isBulletinEnabled)} className={`w-14 h-8 rounded-full relative transition-all duration-300 ${isBulletinEnabled ? 'bg-green-500' : 'bg-gray-300'}`}>
+                 <div className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-all duration-300 ${isBulletinEnabled ? 'left-7' : 'left-1'}`}></div>
+               </button>
+               <span className={`text-[10px] font-black uppercase tracking-widest ${isBulletinEnabled ? 'text-green-600' : 'text-gray-400'}`}>Abierto</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Selector de Estudiante (Para Padres) */}
+      {user.role === UserRole.PARENT && (
+        <div className="flex items-center space-x-4 bg-white p-4 rounded-[1.5rem] shadow-sm border border-gray-100 overflow-x-auto custom-scrollbar">
+          <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest px-3 whitespace-nowrap">Hijos vinculados:</span>
+          {studentsMock.map(s => (
+            <button key={s.id} onClick={() => setSelectedStudentId(s.id)} className={`px-8 py-2.5 rounded-2xl font-black text-sm transition-all whitespace-nowrap ${selectedStudentId === s.id ? 'bg-royal-blue text-white shadow-xl scale-105' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>
               {s.name}
             </button>
           ))}
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
-        <div>
-          <h2 className="text-3xl font-black text-gray-900 tracking-tight italic">
-            Expediente Académico: {activeStudent.name}
-          </h2>
-          <p className="text-gray-500 font-medium">Grado {activeStudent.grade} • Análisis de Rendimiento 2024</p>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-6">
+        <div className="space-y-1">
+          <div className="flex items-center space-x-3">
+             <div className="w-2 h-8 bg-school-yellow rounded-full"></div>
+             <h2 className="text-3xl font-black text-gray-900 tracking-tight italic">Calificaciones: {activeStudent.name}</h2>
+          </div>
+          <p className="text-gray-500 font-medium ml-5">Reporte académico consolidado 2024</p>
         </div>
         
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap gap-3 items-center">
           {user.role === UserRole.TEACHER && (
-            <button 
-              onClick={() => setEditMode(!editMode)}
-              className={`px-8 py-2.5 rounded-2xl font-black transition-all shadow-md transform active:scale-95 text-sm ${
-                editMode ? 'bg-green-500 text-white' : 'bg-royal-blue text-white'
-              }`}
-            >
-              {editMode ? '✓ Guardar Cambios' : '✎ Editar Notas'}
-            </button>
+            <>
+              <button 
+                onClick={() => { setIsBulkMode(!isBulkMode); setEditMode(false); setSelectedRowSubjects(new Set()); }}
+                className={`px-6 py-3 rounded-2xl font-black transition-all shadow-xl transform active:scale-95 text-sm ${
+                  isBulkMode ? 'bg-royal-blue text-white ring-4 ring-blue-100' : 'bg-white border-2 border-royal-blue text-royal-blue'
+                }`}
+              >
+                {isBulkMode ? '✕ Cancelar Selección' : '⚡ Edición Masiva'}
+              </button>
+              <button 
+                onClick={() => { setEditMode(!editMode); setIsBulkMode(false); }}
+                className={`px-8 py-3 rounded-2xl font-black transition-all shadow-xl transform active:scale-95 text-sm ${
+                  editMode ? 'bg-green-500 text-white animate-pulse' : 'bg-royal-blue text-white'
+                }`}
+              >
+                {editMode ? '✓ Finalizar Edición' : '✎ Cargar Notas'}
+              </button>
+            </>
           )}
-          <button className="bg-school-yellow text-royal-blue border-2 border-school-yellow px-6 py-2.5 rounded-2xl font-black hover:bg-yellow-400 transition-all text-sm shadow-sm">
-             Descargar Boletín Oficial
+          
+          <button onClick={handleDownloadBulletin} disabled={!isBulletinEnabled} className={`flex items-center space-x-2 px-8 py-3 rounded-2xl font-black transition-all text-sm shadow-xl border-2 ${isBulletinEnabled ? 'bg-school-yellow text-royal-blue border-school-yellow hover:bg-yellow-400 transform active:scale-95' : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'}`}>
+             <span className="text-xl">📥</span>
+             <span>Boletín PDF</span>
           </button>
         </div>
       </div>
 
-      {/* SECCIÓN DE RESUMEN HISTÓRICO CON GRÁFICA */}
-      <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 grid lg:grid-cols-12 gap-10">
-        <div className="lg:col-span-8 space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xl font-black text-gray-900 italic">Tendencia de Rendimiento Anual</h3>
-            <div className="flex items-center space-x-4">
-               <div className="flex items-center space-x-2">
-                 <div className="w-3 h-3 bg-royal-blue rounded-full"></div>
-                 <span className="text-[10px] font-bold text-gray-400 uppercase">Promedio General</span>
-               </div>
-            </div>
-          </div>
-          
-          <div className="relative h-64 w-full flex items-end">
-            <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
-              {[5, 4, 3, 2, 1, 0].map(val => (
-                <div key={val} className="border-t border-gray-50 w-full h-0 relative">
-                  <span className="absolute -left-8 -top-2 text-[8px] font-black text-gray-300">{val}.0</span>
-                </div>
-              ))}
-            </div>
-
-            <svg className="w-full h-full relative z-10 overflow-visible" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#0038A8" stopOpacity="0.2" />
-                  <stop offset="100%" stopColor="#0038A8" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              
-              {/* Área sombreada */}
-              <path
-                d={`M 0 256 ${historicalAverages.map((v, i) => `L ${(i * (100 / 5))}% ${256 - (v / 5 * 256)}`).join(' ')} L 100% 256 Z`}
-                fill="url(#chartGradient)"
-                className="transition-all duration-1000"
-              />
-
-              {/* Línea principal */}
-              <polyline
-                fill="none"
-                stroke="#0038A8"
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                points={historicalAverages.map((v, i) => `${(i * (100 / 5))}%,${256 - (v / 5 * 256)}`).join(' ')}
-                className="animate-draw"
-                style={{ vectorEffect: 'non-scaling-stroke' }}
-              />
-
-              {/* Puntos de datos interactivos */}
-              {historicalAverages.map((v, i) => (
-                <g key={i} className="group cursor-pointer">
-                  <circle 
-                    cx={`${(i * (100 / 5))}%`} 
-                    cy={256 - (v / 5 * 256)} 
-                    r="6" 
-                    fill="#0038A8" 
-                    className="hover:r-8 transition-all" 
-                  />
-                  <rect 
-                    x={`${(i * (100 / 5)) - 2}%`} 
-                    y={256 - (v / 5 * 256) - 30} 
-                    width="40" 
-                    height="20" 
-                    rx="4" 
-                    className="fill-gray-900 opacity-0 group-hover:opacity-100 transition-opacity"
-                  />
-                  <text 
-                    x={`${(i * (100 / 5))}%`} 
-                    y={256 - (v / 5 * 256) - 16} 
-                    textAnchor="middle" 
-                    className="text-[10px] font-black fill-white opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                  >
-                    {v.toFixed(1)}
-                  </text>
-                </g>
-              ))}
-            </svg>
-
-            <div className="absolute bottom-[-30px] w-full flex justify-between">
-              {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun'].map(mes => (
-                <span key={mes} className="text-[10px] font-black text-gray-400 uppercase w-0 overflow-visible text-center" style={{marginLeft: '0%'}}>{mes}</span>
-              ))}
-            </div>
-          </div>
+      {/* Barra de Filtros */}
+      <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div className="space-y-2">
+          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Asignatura</label>
+          <input 
+            type="text" 
+            placeholder="Buscar materia..." 
+            value={filterSubject}
+            onChange={(e) => setFilterSubject(e.target.value)}
+            className="w-full px-4 py-2.5 border-2 border-gray-50 rounded-xl focus:border-royal-blue outline-none transition-all font-medium text-sm"
+          />
         </div>
-
-        <div className="lg:col-span-4 border-l border-gray-100 pl-8 space-y-6">
-          <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest">Tendencias Clave</h4>
-          
-          <div className="space-y-4">
-             <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                <p className="text-[10px] font-black text-royal-blue uppercase mb-1">Crecimiento Mensual</p>
-                <div className="flex items-center space-x-2">
-                   <span className="text-green-500 text-lg">▲</span>
-                   <span className="text-xl font-black text-gray-900">+2.4%</span>
-                </div>
-             </div>
-
-             <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                <p className="text-[10px] font-black text-gray-400 uppercase mb-1">Materia Destacada</p>
-                <div className="flex items-center justify-between">
-                   <span className="font-black text-gray-800 italic">Matemáticas</span>
-                   <span className="bg-royal-blue text-white text-[10px] px-2 py-0.5 rounded-lg">4.8</span>
-                </div>
-             </div>
-
-             <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                <p className="text-[10px] font-black text-gray-400 uppercase mb-1">Nivel de Esfuerzo</p>
-                <div className="flex items-center space-x-1">
-                   {[1,2,3,4,5].map(s => <span key={s} className={`text-sm ${s <= 4 ? 'text-school-yellow' : 'text-gray-200'}`}>★</span>)}
-                   <span className="text-[10px] font-bold text-gray-500 ml-2">Alto</span>
-                </div>
-             </div>
-          </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Periodo</label>
+          <select 
+            value={filterPeriod}
+            onChange={(e) => setFilterPeriod(e.target.value)}
+            className="w-full px-4 py-2.5 border-2 border-gray-50 rounded-xl focus:border-royal-blue outline-none transition-all font-medium text-sm bg-white"
+          >
+            <option value="">Todos los periodos</option>
+            <option value="1">Periodo 1</option>
+            <option value="2">Periodo 2</option>
+            <option value="3">Periodo 3</option>
+            <option value="4">Periodo 4</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Desempeño</label>
+          <select 
+            value={filterScoreRange}
+            onChange={(e) => setFilterScoreRange(e.target.value)}
+            className="w-full px-4 py-2.5 border-2 border-gray-50 rounded-xl focus:border-royal-blue outline-none transition-all font-medium text-sm bg-white"
+          >
+            <option value="">Cualquier puntaje</option>
+            <option value="superior">Superior (4.6 - 5.0)</option>
+            <option value="alto">Alto (4.0 - 4.5)</option>
+            <option value="basico">Básico (3.5 - 3.9)</option>
+            <option value="bajo">Bajo (0.0 - 3.4)</option>
+          </select>
+        </div>
+        <div className="flex space-x-2">
+          <button 
+            onClick={resetFilters}
+            className="flex-1 bg-gray-100 text-gray-500 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-gray-200 transition-all"
+          >
+            Limpiar
+          </button>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-10">
-        <div className="lg:col-span-8 space-y-8">
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-8 bg-gray-50/50 border-b flex items-center justify-between">
-              <h3 className="font-black text-gray-900 italic">Calificaciones por Asignatura</h3>
-              <select className="px-4 py-1 border border-gray-200 rounded-full outline-none font-bold text-xs bg-white text-gray-900">
-                <option value="1">Primer Periodo</option>
-                <option value="2">Segundo Periodo</option>
-                <option value="3">Tercer Periodo</option>
-              </select>
-            </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-gray-50 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">
-                    <th className="px-8 py-4">Asignatura</th>
-                    <th className="px-8 py-4 text-center">Nota</th>
-                    <th className="px-8 py-4 text-center">Puesto</th>
-                    <th className="px-8 py-4">Histórico</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {activeGrades.map((grade, i) => (
-                    <tr key={i} className="hover:bg-blue-50/30 transition-colors">
-                      <td className="px-8 py-6">
-                        <p className="font-black text-gray-800 italic">{grade.subject}</p>
-                        <p className="text-[10px] text-gray-400 font-bold uppercase">Ver Competencias</p>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="flex justify-center">
-                          {editMode ? (
-                            <input 
-                              type="number"
-                              step="0.1"
-                              value={grade.score}
-                              onChange={(e) => handleScoreChange(i, e.target.value)}
-                              className="w-16 px-2 py-1 border-2 border-royal-blue rounded-lg text-center font-black text-gray-900"
-                            />
-                          ) : (
-                            <span className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg shadow-sm border ${
-                              grade.score >= 4.0 ? 'bg-green-50 text-green-600 border-green-100' : 
-                              grade.score >= 3.0 ? 'bg-yellow-50 text-yellow-600 border-yellow-100' : 'bg-red-50 text-red-600 border-red-100'
-                            }`}>
-                              {grade.score.toFixed(1)}
-                            </span>
-                          )}
+      {/* Barra de Herramientas Masivas */}
+      {isBulkMode && selectedRowSubjects.size > 0 && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 bg-white border-2 border-royal-blue/20 p-6 rounded-[2.5rem] shadow-2xl flex flex-col md:flex-row items-center gap-6 animate-fadeIn w-[90%] max-w-4xl">
+           <div className="flex flex-col items-center md:items-start shrink-0">
+              <span className="bg-royal-blue text-white px-3 py-1 rounded-full text-[10px] font-black uppercase mb-1">{selectedRowSubjects.size} seleccionados</span>
+              <p className="text-xs font-bold text-gray-400">Aplicar cambios globales:</p>
+           </div>
+           <div className="flex flex-1 gap-4 w-full">
+              <input 
+                type="number" step="0.1" placeholder="Nota" 
+                value={bulkScore} onChange={(e) => setBulkScore(e.target.value)}
+                className="w-24 px-4 py-3 border-2 border-gray-100 rounded-2xl font-black focus:border-royal-blue transition-all outline-none"
+              />
+              <input 
+                type="text" placeholder="Comentario general..." 
+                value={bulkComment} onChange={(e) => setBulkComment(e.target.value)}
+                className="flex-1 px-4 py-3 border-2 border-gray-100 rounded-2xl font-medium focus:border-royal-blue transition-all outline-none italic"
+              />
+           </div>
+           <button 
+            onClick={() => setShowBulkConfirm(true)}
+            disabled={!bulkScore && !bulkComment}
+            className="bg-royal-blue text-white px-8 py-3 rounded-2xl font-black shadow-xl hover:bg-blue-800 transition-all disabled:opacity-50 whitespace-nowrap"
+           >
+             Aplicar a {selectedRowSubjects.size} filas
+           </button>
+        </div>
+      )}
+
+      {/* Diálogo de Confirmación Masiva */}
+      {showBulkConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-royal-blue/40 backdrop-blur-sm animate-fadeIn">
+           <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-md w-full text-center space-y-6">
+              <div className="w-20 h-20 bg-yellow-50 text-yellow-500 rounded-3xl flex items-center justify-center mx-auto text-4xl shadow-inner">⚠️</div>
+              <h3 className="text-2xl font-black text-gray-900 italic">¿Confirmar cambios masivos?</h3>
+              <p className="text-gray-500 font-medium leading-relaxed">Estás a punto de actualizar {selectedRowSubjects.size} asignaturas simultáneamente. Esta acción impactará el promedio general del estudiante.</p>
+              <div className="flex gap-4 pt-4">
+                 <button onClick={() => setShowBulkConfirm(false)} className="flex-1 py-4 font-black text-gray-400 hover:text-gray-600 transition-colors uppercase text-sm tracking-widest">Cancelar</button>
+                 <button onClick={applyBulkChanges} className="flex-1 bg-royal-blue text-white py-4 rounded-2xl font-black shadow-xl hover:bg-blue-800 transition-all uppercase text-sm tracking-widest">Sí, Aplicar</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-[3rem] shadow-sm border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-white text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] border-b">
+                <th className="px-10 py-5">
+                   {isBulkMode ? (
+                     <div className="flex items-center space-x-3">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedRowSubjects.size === activeGrades.length} 
+                          onChange={toggleSelectAll}
+                          className="w-5 h-5 accent-royal-blue rounded-md cursor-pointer"
+                        />
+                        <span>Asignatura</span>
+                     </div>
+                   ) : 'Área / Asignatura'}
+                </th>
+                <th className="px-10 py-5 text-center">Calificación</th>
+                <th className="px-10 py-5 text-center">Desempeño</th>
+                <th className="px-10 py-5 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {activeGrades.map((grade, i) => (
+                <React.Fragment key={`${grade.subject}-${grade.period}`}>
+                  <tr 
+                    className={`group transition-all duration-300 cursor-pointer ${selectedRowSubjects.has(grade.subject) ? 'bg-blue-50/80 border-l-4 border-royal-blue' : (expandedSubject === grade.subject ? 'bg-blue-50/50' : 'hover:bg-gray-50/80')}`}
+                    onClick={() => isBulkMode ? toggleRowSelection(grade.subject) : toggleRow(grade.subject)}
+                  >
+                    <td className="px-10 py-6">
+                      <div className="flex items-center space-x-5">
+                        {isBulkMode ? (
+                           <input 
+                            type="checkbox" 
+                            checked={selectedRowSubjects.has(grade.subject)}
+                            onChange={() => toggleRowSelection(grade.subject)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-5 h-5 accent-royal-blue rounded-md cursor-pointer"
+                           />
+                        ) : (
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${expandedSubject === grade.subject ? 'bg-royal-blue text-white rotate-90 shadow-lg' : 'bg-gray-100 text-gray-400 group-hover:bg-blue-100'}`}>
+                             <span className="text-xs">▶</span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-black text-gray-800 text-lg group-hover:text-royal-blue transition-colors italic">{grade.subject}</p>
+                          <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">Periodo {grade.period} • 2024</p>
                         </div>
-                      </td>
-                      <td className="px-8 py-6 text-center">
-                        <span className="text-sm font-black text-royal-blue bg-blue-100/50 px-3 py-1 rounded-lg">
-                          {grade.subjectRank}°
-                        </span>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="w-24 h-10 flex items-end space-x-1">
-                          {grade.history?.map((h, idx) => (
-                            <div 
-                              key={idx} 
-                              className="bg-royal-blue/30 w-full rounded-t-sm relative group"
-                              style={{ height: `${(h / 5) * 100}%` }}
-                            >
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-gray-900 text-white text-[8px] font-bold px-1 rounded">
-                                {h}
-                              </div>
+                      </div>
+                    </td>
+                    <td className="px-10 py-6">
+                      <div className="flex justify-center">
+                        {editMode ? (
+                          <input 
+                            type="number" step="0.1" value={grade.score}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => handleScoreChange(i, e.target.value)}
+                            className="w-20 px-4 py-2 border-2 border-royal-blue rounded-xl text-center font-black text-gray-900 bg-white shadow-inner focus:ring-4 focus:ring-royal-blue/10 outline-none"
+                          />
+                        ) : (
+                          <div className={`w-16 h-16 rounded-[1.5rem] flex flex-col items-center justify-center font-black text-xl transition-all shadow-md group-hover:scale-110 ${getScoreBadgeStyles(grade.score)}`}>
+                             <span>{grade.score.toFixed(1)}</span>
+                             <span className="text-[8px] uppercase tracking-tighter opacity-70 mt-[-2px]">Nota</span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-10 py-6 text-center">
+                      <span className={`px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm ${getScoreBadgeStyles(grade.score)}`}>
+                        {getScoreLabel(grade.score)}
+                      </span>
+                    </td>
+                    <td className="px-10 py-6 text-right">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setIsViewingDetail(true); }}
+                        className="bg-white border-2 border-gray-100 text-gray-500 text-[10px] font-black px-6 py-3 rounded-2xl hover:border-royal-blue hover:text-royal-blue hover:bg-royal-blue/5 transition-all uppercase tracking-widest shadow-sm transform active:scale-95"
+                      >
+                        Ver Expediente
+                      </button>
+                    </td>
+                  </tr>
+                  
+                  {expandedSubject === grade.subject && !isBulkMode && (
+                    <tr className="bg-white/80 animate-fadeIn border-l-4 border-royal-blue">
+                      <td colSpan={4} className="px-12 py-12">
+                        <div className="grid lg:grid-cols-2 gap-16">
+                          <div className="space-y-6">
+                            <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+                               <h4 className="text-xs font-black text-royal-blue uppercase tracking-widest flex items-center">
+                                  <span className="w-2 h-4 bg-royal-blue rounded-full mr-3"></span>
+                                  Desglose de Calificaciones
+                               </h4>
+                               <span className="text-[9px] font-bold text-gray-400 uppercase">Suma de pesos: 100%</span>
                             </div>
-                          ))}
+                            <div className="grid gap-4">
+                              {grade.assignments?.map((assign, idx) => (
+                                <div key={idx} className="flex justify-between items-center bg-gray-50 p-6 rounded-2xl border border-gray-100 shadow-sm hover:bg-white hover:shadow-lg hover:border-royal-blue/20 transition-all cursor-default group/item">
+                                  <div className="flex items-center space-x-5">
+                                     <div className="w-12 h-12 bg-white rounded-2xl flex flex-col items-center justify-center font-black text-royal-blue border border-gray-100 group-hover/item:bg-royal-blue group-hover/item:text-white transition-colors">
+                                        <span className="text-xs">{idx + 1}</span>
+                                        <span className="text-[8px] uppercase tracking-tighter opacity-70">Actividad</span>
+                                     </div>
+                                     <div>
+                                        <p className="font-black text-gray-800 text-sm italic">{assign.name}</p>
+                                        <div className="flex items-center space-x-3 mt-1">
+                                           <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest">Peso: {assign.weight}</p>
+                                           <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                           <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest">{assign.date}</p>
+                                        </div>
+                                     </div>
+                                  </div>
+                                  <div className={`px-5 py-2.5 rounded-2xl font-black text-lg border-2 shadow-sm ${assign.score >= 4.0 ? 'border-green-100 bg-green-50 text-green-700' : (assign.score >= 3.0 ? 'border-yellow-100 bg-yellow-50 text-yellow-700' : 'border-red-100 bg-red-50 text-red-600')}`}>
+                                     {assign.score.toFixed(1)}
+                                  </div>
+                                </div>
+                              ))}
+                              {(!grade.assignments || grade.assignments.length === 0) && (
+                                <p className="text-sm text-gray-400 italic">No hay tareas detalladas registradas para esta asignatura.</p>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-6">
+                            <h4 className="text-xs font-black text-royal-blue uppercase tracking-widest flex items-center border-b border-gray-100 pb-4">
+                               <span className="w-2 h-4 bg-school-yellow rounded-full mr-3"></span>
+                               Observaciones del Profesor
+                            </h4>
+                            <div className="bg-blue-50/50 p-10 rounded-[2.5rem] border-2 border-dashed border-royal-blue/20 relative">
+                               <div className="absolute top-6 right-10 text-7xl text-royal-blue/5 font-black italic select-none">"</div>
+                               <p className="text-gray-700 text-base leading-relaxed italic font-medium relative z-10">
+                                  {grade.teacherComment || "El docente aún no ha registrado observaciones adicionales para este periodo evaluativo."}
+                                </p>
+                                <div className="mt-10 pt-6 border-t border-royal-blue/10 flex items-center justify-between">
+                                   <div className="flex items-center space-x-3">
+                                      <div className="w-10 h-10 bg-royal-blue rounded-2xl flex items-center justify-center text-white text-xs font-black italic shadow-md">MB</div>
+                                      <div>
+                                         <p className="text-[10px] font-black text-gray-800 uppercase tracking-widest">Titular de Área</p>
+                                         <p className="text-[9px] text-gray-400 font-bold">Validado el {new Date().toLocaleDateString()}</p>
+                                      </div>
+                                   </div>
+                                   <span className="text-[10px] font-black text-royal-blue bg-white px-3 py-1 rounded-lg border border-royal-blue/10">Sede Principal</span>
+                                </div>
+                            </div>
+                          </div>
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                  )}
+                </React.Fragment>
+              ))}
+              {activeGrades.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-10 py-20 text-center">
+                    <div className="flex flex-col items-center space-y-4">
+                      <span className="text-5xl">🔍</span>
+                      <p className="text-gray-400 font-bold italic">No se encontraron resultados para los filtros aplicados.</p>
+                      <button onClick={resetFilters} className="text-royal-blue font-black underline uppercase text-xs tracking-widest">Ver todo de nuevo</button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-12 gap-10 mt-12">
+        <div className="lg:col-span-8 bg-white p-10 rounded-[3rem] shadow-sm border border-gray-100 space-y-8">
+           <div className="flex items-center justify-between mb-2">
+              <h3 className="text-2xl font-black text-gray-900 italic flex items-center">
+                 <span className="w-12 h-12 bg-blue-50 text-royal-blue rounded-2xl flex items-center justify-center mr-5 text-2xl shadow-inner">📈</span>
+                 Rendimiento Histórico
+              </h3>
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Últimos 6 Reportes</span>
+           </div>
+           <div className="relative h-64 w-full flex items-end px-4">
+              <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                {[5, 4, 3, 2, 1, 0].map(val => (
+                  <div key={val} className="border-t border-gray-50 w-full h-0 relative">
+                    <span className="absolute -left-8 -top-2 text-[8px] font-black text-gray-300">{val}.0</span>
+                  </div>
+                ))}
+              </div>
+              <svg className="w-full h-full relative z-10 overflow-visible" preserveAspectRatio="none">
+                <polyline
+                  fill="none"
+                  stroke="#0038A8"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  points={historicalAverages.map((v, i) => `${(i * (100 / 5))}%,${256 - (v / 5 * 256)}`).join(' ')}
+                  className="animate-draw"
+                  style={{ vectorEffect: 'non-scaling-stroke' }}
+                />
+                {historicalAverages.map((v, i) => (
+                  <circle key={i} cx={`${(i * (100 / 5))}%`} cy={256 - (v / 5 * 256)} r="6" fill="#0038A8" className="hover:r-10 transition-all cursor-help" />
+                ))}
+              </svg>
+           </div>
         </div>
 
         <div className="lg:col-span-4 space-y-8">
-          <div className="bg-royal-blue p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
+          <div className="bg-royal-blue p-8 rounded-[3rem] shadow-2xl relative overflow-hidden group">
             <div className="absolute top-0 right-0 p-4 text-6xl opacity-20 rotate-12 group-hover:rotate-45 transition-transform duration-500 select-none">✨</div>
             <h3 className="text-xl font-black text-white mb-4 italic tracking-tight">Análisis IA Misión Boston</h3>
             <p className="text-blue-100 text-sm font-medium leading-relaxed mb-8 opacity-80">
-              Analiza el progreso de {activeStudent.name.split(' ')[0]} para recibir consejos de mejora personalizados.
+              Analiza el progreso académico de su hijo con tecnología de punta y valores cristianos para recibir recomendaciones personalizadas.
             </p>
             <button 
-              onClick={handleGenerateSummary}
-              disabled={loadingAi}
-              className="w-full bg-school-yellow text-royal-blue py-4 rounded-2xl font-black hover:bg-yellow-400 transition-all shadow-xl transform active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-3"
+              onClick={handleGenerateSummary} disabled={loadingAi}
+              className="w-full bg-school-yellow text-royal-blue py-5 rounded-3xl font-black hover:bg-yellow-400 transition-all shadow-xl transform active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-3"
             >
-              {loadingAi ? <span className="animate-spin text-xl">🌀</span> : <span>Generar Informe IA</span>}
+              {loadingAi ? <span className="animate-spin text-xl">🌀</span> : <span>Generar Resumen Inteligente</span>}
             </button>
           </div>
-
           {aiSummary && (
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border-2 border-school-yellow animate-slideIn relative">
-              <div className="absolute top-[-10px] left-8 bg-school-yellow text-royal-blue text-[10px] font-black px-4 py-1 rounded-full uppercase shadow-sm">
-                Perspectiva del Periodo
-              </div>
-              <p className="text-sm text-gray-700 font-medium italic leading-relaxed">"{aiSummary}"</p>
+            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border-4 border-school-yellow/30 animate-fadeIn relative">
+              <div className="absolute top-[-15px] left-8 bg-school-yellow text-royal-blue text-[10px] font-black px-6 py-2 rounded-full uppercase shadow-md border-2 border-white">Perspectiva del Periodo</div>
+              <p className="text-sm text-gray-700 font-medium italic leading-relaxed py-4">"{aiSummary}"</p>
             </div>
           )}
-
-          <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100">
-            <h4 className="text-sm font-black text-gray-900 mb-6 uppercase tracking-[0.2em] border-b pb-4">Rankings del Curso</h4>
-            <div className="space-y-4">
-               <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                  <span className="font-black text-gray-800">Puesto General</span>
-                  <span className="text-royal-blue font-black text-xl">{activeStudent.generalRank}°</span>
-               </div>
-               <div className="p-4 border border-dashed border-gray-200 rounded-2xl text-center">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase">Total Estudiantes</p>
-                  <p className="font-black text-gray-900">{activeStudent.totalStudentsInCourse}</p>
-               </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -1,7 +1,8 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Always use the named parameter and direct process.env.API_KEY reference
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const getSmartReportSummary = async (studentName: string, grades: any[]) => {
   const prompt = `Analiza las siguientes notas del estudiante ${studentName} del Instituto Cristiano Misión Boston y genera un resumen motivador para los padres en español.

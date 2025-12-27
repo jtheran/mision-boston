@@ -1,13 +1,8 @@
 
 import React, { useState } from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, Outlet } from 'react-router-dom';
 import { User, UserRole } from '../types';
 import { Logo } from '../constants';
-import GradesManagement from './GradesManagement';
-import Enrollment from './Enrollment';
-import Payments from './Payments';
-import UsersManagement from './UsersManagement';
-import CoursesManagement from './CoursesManagement';
 
 interface DashboardProps {
   user: User;
@@ -84,21 +79,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
         </header>
 
         <div className="flex-1 overflow-y-auto p-10 bg-gray-50/50">
-          <Routes>
-            <Route index element={<DashboardHome user={user} />} />
-            <Route path="grades" element={<GradesManagement user={user} />} />
-            <Route path="enrollment" element={<Enrollment user={user} />} />
-            <Route path="payments" element={<Payments user={user} />} />
-            <Route path="users" element={<UsersManagement user={user} />} />
-            <Route path="courses" element={<CoursesManagement user={user} />} />
-          </Routes>
+          <Outlet />
         </div>
       </main>
     </div>
   );
 };
 
-const DashboardHome: React.FC<{ user: User }> = ({ user }) => (
+export const DashboardHome: React.FC<{ user: User }> = ({ user }) => (
   <div className="space-y-10 animate-fadeIn">
     <div className="relative bg-white p-10 rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden group">
       <div className="absolute -right-20 -top-20 w-64 h-64 bg-royal-blue/5 rounded-full group-hover:scale-110 transition-transform duration-700"></div>

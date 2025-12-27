@@ -8,9 +8,9 @@ const Enrollment: React.FC<{ user: User }> = ({ user }) => {
   const [errors, setErrors] = useState<{ name?: string; grade?: string }>({});
   
   const documents = [
-    { id: 'doc1', name: 'Documento Identidad Estudiante', status: 'Cargado', date: '2024-01-10' },
-    { id: 'doc2', name: 'Certificados Años Anteriores', status: 'Pendiente', date: '-' },
-    { id: 'doc3', name: 'Carnet de Vacunación', status: 'En Revisión', date: '2024-01-11' },
+    { id: 'doc1', name: 'Documento Identidad Estudiante', status: 'Cargado', description: 'El documento ha sido subido correctamente y está a la espera de validación final.' },
+    { id: 'doc2', name: 'Certificados Años Anteriores', status: 'Pendiente', description: 'Aún no has subido este documento. Es obligatorio para finalizar el proceso.' },
+    { id: 'doc3', name: 'Carnet de Vacunación', status: 'En Revisión', description: 'Nuestro equipo administrativo está verificando la validez del documento cargado.' },
   ];
 
   const handleNextStep1 = () => {
@@ -74,12 +74,12 @@ const Enrollment: React.FC<{ user: User }> = ({ user }) => {
                 <select 
                   value={formData.grade}
                   onChange={(e) => setFormData({...formData, grade: e.target.value})}
-                  className={`w-full px-4 py-2.5 border rounded-xl focus:ring-2 outline-none transition bg-white text-gray-900 font-medium ${errors.grade ? 'border-red-500 ring-red-50' : 'border-gray-200 focus:ring-royal-blue'}`}
+                  className={`w-full px-4 py-2.5 border rounded-xl focus:ring-2 outline-none transition bg-white text-black font-medium ${errors.grade ? 'border-red-500 ring-red-50' : 'border-gray-200 focus:ring-royal-blue'}`}
                 >
-                  <option value="" className="text-gray-900">Seleccione...</option>
-                  <option value="transicion" className="text-gray-900">Transición</option>
-                  <option value="primero" className="text-gray-900">Primero de Primaria</option>
-                  <option value="segundo" className="text-gray-900">Segundo de Primaria</option>
+                  <option value="">Seleccione...</option>
+                  <option value="transicion">Transición</option>
+                  <option value="primero">Primero de Primaria</option>
+                  <option value="segundo">Segundo de Primaria</option>
                 </select>
                 {errors.grade && <p className="text-red-500 text-[10px] font-bold mt-1">{errors.grade}</p>}
               </div>
@@ -115,9 +115,20 @@ const Enrollment: React.FC<{ user: User }> = ({ user }) => {
                 <div key={doc.id} className="flex flex-col md:flex-row md:items-center justify-between p-5 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors gap-4">
                   <div>
                     <p className="font-bold text-gray-800">{doc.name}</p>
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className={`w-2 h-2 rounded-full ${doc.status === 'Cargado' ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">{doc.status}</span>
+                    <div className="relative group inline-block mt-1">
+                      <div className="flex items-center space-x-2 cursor-help">
+                        <span className={`w-2 h-2 rounded-full ${
+                          doc.status === 'Cargado' ? 'bg-green-500' : 
+                          doc.status === 'En Revisión' ? 'bg-yellow-500' : 'bg-red-500'
+                        }`}></span>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide underline decoration-dotted">{doc.status}</span>
+                      </div>
+                      
+                      {/* Tooltip implementation */}
+                      <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block w-48 bg-gray-900 text-white text-[9px] font-medium p-2 rounded-lg shadow-xl z-50 animate-fadeIn">
+                        {doc.description}
+                        <div className="absolute top-full left-4 border-8 border-transparent border-t-gray-900"></div>
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center space-x-3">
