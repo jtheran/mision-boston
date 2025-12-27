@@ -1,0 +1,7 @@
+{
+  "name": "Misión Boston - Plataforma Educativa",
+  "description": "Plataforma integral para el Instituto Cristiano Misión Boston, gestionando matrículas, notas, pagos y comunicación escolar.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
